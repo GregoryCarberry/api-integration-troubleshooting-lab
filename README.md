@@ -179,6 +179,23 @@ Incorrect request header.
 
 ------------------------------------------------------------------------
 
+## Example Server Logs
+
+When running the API locally, request lifecycle events are logged with a
+request ID to help trace individual requests during troubleshooting.
+
+Example:
+
+```
+2026-03-06 22:47:31 [INFO] [request_id=3f2c1f8a] Incoming request: POST /api/orders
+2026-03-06 22:47:31 [INFO] [request_id=3f2c1f8a] Authentication successful
+2026-03-06 22:47:31 [INFO] [request_id=3f2c1f8a] Order created successfully: 6e7c...
+```
+The `X-Request-ID` header returned in responses allows a specific request
+to be correlated with its server-side logs.
+
+------------------------------------------------------------------------
+
 ## Future Improvements
 
 Possible extensions:
