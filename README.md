@@ -4,9 +4,39 @@ A small lab environment for reproducing and diagnosing common API
 integration failures such as authentication errors, malformed XML
 payloads, and incorrect request headers.
 
-The repository includes a mock Flask API, example XML payloads, a
-Postman collection, and a Python troubleshooting script used to
-reproduce and investigate integration issues.
+This service acts as the **backend API** in the **API Troubleshooting
+Lab Series**, a small multi‑service environment designed to simulate
+real‑world API platform debugging and integration support workflows.
+
+Companion project:
+
+API Gateway Troubleshooting Lab\
+https://github.com/GregoryCarberry/api-gateway-troubleshooting-lab
+
+------------------------------------------------------------------------
+
+## Lab Series Architecture
+
+The backend API works together with the API Gateway project to simulate
+a simple API platform architecture.
+
+Client\
+│\
+▼\
+API Gateway (FastAPI)\
+│\
+▼\
+Backend API (Flask -- this repository)
+
+The gateway provides:
+
+-   API key authentication
+-   rate limiting
+-   request tracing
+-   gateway‑level error handling
+
+The backend API focuses on validating requests and reproducing common
+integration failures.
 
 ------------------------------------------------------------------------
 
@@ -55,19 +85,15 @@ API troubleshooting workflows.
 
 Start the API server:
 
-``` bash
-cd api-server
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python app.py
-```
+    cd api-server
+    python -m venv .venv
+    source .venv/bin/activate
+    pip install -r requirements.txt
+    python app.py
 
 In another terminal, run the troubleshooting script:
 
-``` bash
-python python-tests/api_test.py
-```
+    python python-tests/api_test.py
 
 ------------------------------------------------------------------------
 
@@ -76,24 +102,26 @@ python python-tests/api_test.py
 The API validates authentication headers, parses XML payloads, and
 returns appropriate HTTP status codes when errors occur.
 
-``` mermaid
-flowchart LR
-
-Client[Client - Postman / Python Script]
---> API[Flask API Server]
-
-API --> Auth{API Key Valid?}
-
-Auth -->|No| Error401[401 Unauthorized]
-
-Auth -->|Yes| XML{XML Payload Valid?}
-
-XML -->|No| Error400[400 Bad Request]
-
-XML -->|Yes| Order[Create Order]
-
-Order --> Success[201 Created]
-```
+    Client
+       │
+       ▼
+    Flask API Server
+       │
+       ▼
+    Authentication Check
+       │
+       ├── Invalid → 401 Unauthorized
+       │
+       ▼
+    XML Validation
+       │
+       ├── Invalid → 400 Bad Request
+       │
+       ▼
+    Order Processing
+       │
+       ▼
+    201 Created
 
 ------------------------------------------------------------------------
 
@@ -186,13 +214,12 @@ request ID to help trace individual requests during troubleshooting.
 
 Example:
 
-```
-2026-03-06 22:47:31 [INFO] [request_id=3f2c1f8a] Incoming request: POST /api/orders
-2026-03-06 22:47:31 [INFO] [request_id=3f2c1f8a] Authentication successful
-2026-03-06 22:47:31 [INFO] [request_id=3f2c1f8a] Order created successfully: 6e7c...
-```
-The `X-Request-ID` header returned in responses allows a specific request
-to be correlated with its server-side logs.
+    2026-03-06 22:47:31 [INFO] [request_id=3f2c1f8a] Incoming request: POST /api/orders
+    2026-03-06 22:47:31 [INFO] [request_id=3f2c1f8a] Authentication successful
+    2026-03-06 22:47:31 [INFO] [request_id=3f2c1f8a] Order created successfully: 6e7c...
+
+The `X-Request-ID` header returned in responses allows a specific
+request to be correlated with its server-side logs.
 
 ------------------------------------------------------------------------
 
@@ -202,5 +229,5 @@ Possible extensions:
 
 -   OAuth authentication support
 -   JSON API version
--   Request logging and tracing
--   Containerised test environment
+-   request tracing integration with gateway logs
+-   containerised test environment
