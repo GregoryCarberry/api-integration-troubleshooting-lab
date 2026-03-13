@@ -1,169 +1,184 @@
+# API Troubleshooting Lab – Backend Service
 
-# API Integration Troubleshooting Lab
+This repository contains the **backend service** for the API Troubleshooting Lab project.
 
-A small backend API built with Flask that simulates common API
-integration failures such as authentication errors, malformed XML
-payloads, and incorrect request headers.
-
-This repository is part of the **API Troubleshooting Lab Series**, a
-multi-service environment designed to demonstrate real-world API
-integration debugging and platform support workflows.
-
-Companion repository:
-
-API Gateway Troubleshooting Lab  
-https://github.com/GregoryCarberry/api-gateway-troubleshooting-lab
+The backend simulates a typical internal service that processes requests forwarded from an API gateway. It intentionally supports multiple failure scenarios to allow debugging and troubleshooting exercises.
 
 ---
 
-# Lab Series Architecture
+## Role in the Architecture
 
-![API Troubleshooting Lab Series Architecture](docs/api-troubleshooting-lab-shared-architecture.svg)
+The backend sits **behind the API gateway**.
 
-The backend API sits behind the gateway layer. The gateway handles
-platform-level concerns such as authentication, rate limiting and
-request tracing before forwarding requests to this backend service.
+The gateway is responsible for:
 
----
+- API key authentication
+- rate limiting
+- request tracing
+- forwarding validated requests
 
-# Quick Start
+The backend focuses purely on **business logic and request processing**.
 
-1. Start the backend API
-2. Start the API Gateway
-3. Send requests via Postman or curl
-4. Reproduce troubleshooting scenarios
-
----
-
-# What This Project Demonstrates
-
-This lab simulates **real-world API integration troubleshooting** rather
-than simple CRUD development.
-
-Skills demonstrated:
-
-- diagnosing authentication failures
-- validating XML payloads
-- identifying incorrect request headers
-- tracing requests using correlation IDs
-- isolating gateway vs backend failures
-- analysing structured logs
+```
+Client
+  │
+  ▼
+API Gateway (FastAPI)
+  │
+  ▼
+Backend API (Flask)
+  │
+  ▼
+Response
+```
 
 ---
 
-# Failure Scenarios
+## Technology
 
-| Scenario | Layer | Response |
-|--------|--------|--------|
-| Missing API key | Gateway | 401 |
-| Invalid API key | Gateway | 403 |
-| Rate limit exceeded | Gateway | 429 |
-| Malformed XML | Backend | 400 |
-| Backend unavailable | Gateway | 502 |
-| Backend timeout | Gateway | 504 |
+- Python
+- Flask
+- XML request payloads
+- In‑memory order storage (for simulation purposes)
 
 ---
 
-# Troubleshooting Workflow Example
+## Endpoints
 
-Example debugging sequence:
+### Health Check
 
-Client request fails  
-↓  
-Gateway returns **502 Bad Gateway**  
-↓  
-Check gateway logs for **X-Request-ID**  
-↓  
-Trace the same request ID in backend logs  
-↓  
-Backend log reveals malformed XML payload  
-↓  
-Fix request payload and retry successfully
+`GET /health`
 
----
+Used to confirm the service is running.
 
-# Observability
+Example:
 
-Requests include a correlation ID using the **X-Request-ID** header.
+```
+curl http://localhost:5000/health
+```
 
-The same ID appears in:
+Response:
 
-- gateway logs
-- backend logs
-- HTTP responses
-
-This allows requests to be traced across services during troubleshooting.
+```
+{
+  "success": true,
+  "status": "ok"
+}
+```
 
 ---
 
-# Repository Structure
+### Create Order
 
-api-integration-troubleshooting-lab/
+`POST /api/orders`
 
-├── app.py  
-├── requirements.txt  
-├── README.md  
+Accepts XML payloads.
 
-├── docs/  
-│   └── api-troubleshooting-lab-shared-architecture.svg  
+Required XML structure:
 
-├── examples/  
-│   ├── valid-order.xml  
-│   └── malformed-order.xml  
+```
+<order>
+  <customerId>123</customerId>
+  <item>Widget</item>
+  <quantity>1</quantity>
+</order>
+```
 
-├── postman/  
-├── screenshots/  
-└── tests/  
-    └── api_test.py  
+Example request:
 
----
+```
+curl -X POST http://localhost:5000/api/orders   -H "Content-Type: application/xml"   -d '<order><customerId>123</customerId><item>Widget</item><quantity>1</quantity></order>'
+```
 
-# Running the Backend API
+Success response:
 
-Create a virtual environment and install dependencies:
-
-    python -m venv .venv
-    source .venv/bin/activate
-    pip install -r requirements.txt
-
-Start the API:
-
-    python app.py
-
-Run troubleshooting tests:
-
-    python tests/api_test.py
+```
+{
+  "success": true,
+  "orderId": "abc123"
+}
+```
 
 ---
 
-# Lab Exercises
+### Get Order
 
-Example troubleshooting exercises:
+`GET /api/orders/<order_id>`
 
-- Diagnose a malformed XML payload
-- Identify a missing API key error
-- Trace a request using correlation IDs
-- Investigate backend log messages
+Returns order details if the order exists.
 
----
+Example:
 
-# System Design Notes
-
-The project intentionally separates the **gateway** and **backend**
-services into different repositories.
-
-This reflects how real API platforms separate:
-
-- platform infrastructure (authentication, rate limiting)
-- application logic (payload validation, business processing)
+```
+curl http://localhost:5000/api/orders/abc123
+```
 
 ---
 
-# Future Improvements
+## Supported Failure Modes
 
-Possible extensions:
+The backend can intentionally simulate failures using the `X-Failure-Mode` header.
 
-- OAuth authentication support
-- JSON API support
-- distributed tracing integration
-- containerised test environment
+This allows reproducible troubleshooting scenarios.
+
+Header example:
+
+```
+X-Failure-Mode: timeout
+```
+
+Supported modes:
+
+| Mode | Result |
+|-----|------|
+| none | Normal processing |
+| timeout | Simulated upstream timeout |
+| dependency | Simulated dependency failure |
+| exception | Simulated internal exception |
+
+---
+
+## Natural Error Scenarios
+
+These errors occur without using failure simulation.
+
+| Scenario | Status |
+|--------|--------|
+| malformed XML | 400 |
+| validation failure | 422 |
+| unsupported content type | 415 |
+| order not found | 404 |
+
+---
+
+## Development
+
+Install dependencies:
+
+```
+pip install -r requirements.txt
+```
+
+Run the service:
+
+```
+python app.py
+```
+
+The service will start on:
+
+```
+http://localhost:5000
+```
+
+---
+
+## Project Context
+
+This service is part of the **API Troubleshooting Lab** multi‑repository project.
+
+The full architecture and diagrams are documented in the hub repository:
+
+```
+api-troubleshooting-lab
+```
