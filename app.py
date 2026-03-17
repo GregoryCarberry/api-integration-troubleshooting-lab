@@ -8,12 +8,13 @@ from uuid import uuid4
 
 from flask import Flask, Response, g, request
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
+from logging_config import setup_logging
 
-logger = logging.getLogger(__name__)
+# Disable default Flask/Werkzeug request logging so only structured logs remain
+log = logging.getLogger("werkzeug")
+log.disabled = True
+
+logger = setup_logging()
 
 app = Flask(__name__)
 
@@ -27,12 +28,12 @@ ALLOWED_FAILURE_MODES = {"none", "timeout", "dependency", "exception"}
 @app.before_request
 def attach_request_id() -> None:
     incoming_request_id = request.headers.get("X-Request-ID", "").strip()
-    g.request_id = incoming_request_id or str(uuid4())[:8]
+    g.request_id = incoming_request_id or str(uuid4())
 
 
 def get_request_id() -> str:
     if not hasattr(g, "request_id"):
-        g.request_id = str(uuid4())[:8]
+        g.request_id = str(uuid4())
     return g.request_id
 
 
@@ -64,20 +65,16 @@ def simulate_failure_mode(failure_mode: str) -> None:
         return
 
     if failure_mode == "timeout":
-        logger.error(
-            "[request_id=%s] Simulating upstream timeout for %.1f seconds",
-            get_request_id(),
-            SIMULATED_TIMEOUT_SECONDS,
-        )
+        logger.error("Simulating upstream timeout")
         time.sleep(SIMULATED_TIMEOUT_SECONDS)
         raise TimeoutError("Simulated upstream timeout occurred")
 
     if failure_mode == "dependency":
-        logger.error("[request_id=%s] Simulating upstream dependency failure", get_request_id())
+        logger.error("Simulating upstream dependency failure")
         raise ConnectionError("Simulated upstream dependency failure")
 
     if failure_mode == "exception":
-        logger.error("[request_id=%s] Simulating unhandled backend exception", get_request_id())
+        logger.error("Simulating unhandled backend exception")
         raise RuntimeError("Simulated unhandled backend exception")
 
 
@@ -94,11 +91,7 @@ def parse_order_xml(xml_bytes: bytes) -> dict[str, str]:
     try:
         root = ET.fromstring(xml_bytes)
     except ET.ParseError as exc:
-        logger.error(
-            "[request_id=%s] Malformed XML payload received: %s",
-            get_request_id(),
-            exc,
-        )
+        logger.error("Malformed XML payload received: %s", exc)
         raise SyntaxError(f"Malformed XML: {exc}") from exc
 
     if root.tag != "Order":
@@ -118,8 +111,7 @@ def parse_order_xml(xml_bytes: bytes) -> dict[str, str]:
         raise LookupError("Invalid XML: <Quantity> must be a positive integer")
 
     logger.info(
-        "[request_id=%s] Parsed XML payload: customer_id=%s product_id=%s quantity=%s",
-        get_request_id(),
+        "Parsed XML payload: customer_id=%s product_id=%s quantity=%s",
         customer_id,
         product_id,
         quantity,
@@ -134,6 +126,7 @@ def parse_order_xml(xml_bytes: bytes) -> dict[str, str]:
 
 @app.get("/health")
 def health() -> Response:
+    logger.info("Health check received")
     response = Response("ok\n", status=200, mimetype="text/plain")
     response.headers["X-Request-ID"] = get_request_id()
     return response
@@ -141,39 +134,35 @@ def health() -> Response:
 
 @app.post("/api/orders")
 def create_order() -> Response:
-    logger.info("[request_id=%s] Incoming request: POST /api/orders", get_request_id())
-    logger.info("[request_id=%s] Headers: %s", get_request_id(), dict(request.headers))
+    logger.info("Incoming request: POST /api/orders")
+    logger.info("Headers: %s", dict(request.headers))
 
     content_type = request.headers.get("Content-Type", "")
     if "application/xml" not in content_type.lower():
-        logger.error(
-            "[request_id=%s] Unsupported Content-Type received: %s",
-            get_request_id(),
-            content_type,
-        )
+        logger.error("Unsupported Content-Type received: %s", content_type)
         return text_response(
             "Unsupported Media Type: Content-Type must be application/xml\n",
             status=415,
         )
 
     if not request.data:
-        logger.error("[request_id=%s] Empty request body received", get_request_id())
+        logger.error("Empty request body received")
         return text_response("Bad Request: request body is empty\n", status=400)
 
     failure_mode = get_failure_mode()
     try:
         validate_failure_mode(failure_mode)
     except ValueError as exc:
-        logger.error("[request_id=%s] Invalid failure mode: %s", get_request_id(), exc)
+        logger.error("Invalid failure mode: %s", exc)
         return text_response(f"Bad Request: {exc}\n", status=400)
 
     try:
         order = parse_order_xml(request.data)
     except SyntaxError as exc:
-        logger.error("[request_id=%s] XML parsing failed: %s", get_request_id(), exc)
+        logger.error("XML parsing failed: %s", exc)
         return text_response(f"Bad Request: {exc}\n", status=400)
     except LookupError as exc:
-        logger.error("[request_id=%s] XML validation failed: %s", get_request_id(), exc)
+        logger.error("XML validation failed: %s", exc)
         return text_response(f"Unprocessable Entity: {exc}\n", status=422)
 
     try:
@@ -183,7 +172,7 @@ def create_order() -> Response:
     except ConnectionError as exc:
         return text_response(f"Service Unavailable: {exc}\n", status=503)
     except RuntimeError:
-        logger.exception("[request_id=%s] Internal server error", get_request_id())
+        logger.exception("Internal server error")
         return text_response(
             "Internal Server Error: simulated backend exception\n",
             status=500,
@@ -192,7 +181,7 @@ def create_order() -> Response:
     order_id = str(uuid4())
     ORDERS[order_id] = order
 
-    logger.info("[request_id=%s] Order created successfully: %s", get_request_id(), order_id)
+    logger.info("Order created successfully: %s", order_id)
 
     response_xml = f"<OrderCreated><OrderID>{order_id}</OrderID></OrderCreated>\n"
     return xml_response(response_xml, status=201)
@@ -200,17 +189,13 @@ def create_order() -> Response:
 
 @app.get("/api/orders/<order_id>")
 def get_order(order_id: str) -> Response:
-    logger.info(
-        "[request_id=%s] Incoming request: GET /api/orders/%s",
-        get_request_id(),
-        order_id,
-    )
+    logger.info("Incoming request: GET /api/orders/%s", order_id)
 
     failure_mode = get_failure_mode()
     try:
         validate_failure_mode(failure_mode)
     except ValueError as exc:
-        logger.error("[request_id=%s] Invalid failure mode: %s", get_request_id(), exc)
+        logger.error("Invalid failure mode: %s", exc)
         return text_response(f"Bad Request: {exc}\n", status=400)
 
     try:
@@ -220,7 +205,7 @@ def get_order(order_id: str) -> Response:
     except ConnectionError as exc:
         return text_response(f"Service Unavailable: {exc}\n", status=503)
     except RuntimeError:
-        logger.exception("[request_id=%s] Internal server error", get_request_id())
+        logger.exception("Internal server error")
         return text_response(
             "Internal Server Error: simulated backend exception\n",
             status=500,
@@ -228,10 +213,10 @@ def get_order(order_id: str) -> Response:
 
     order = ORDERS.get(order_id)
     if not order:
-        logger.warning("[request_id=%s] Order not found: %s", get_request_id(), order_id)
+        logger.warning("Order not found: %s", order_id)
         return text_response("Not Found\n", status=404)
 
-    logger.info("[request_id=%s] Order retrieved successfully: %s", get_request_id(), order_id)
+    logger.info("Order retrieved successfully: %s", order_id)
 
     response_xml = (
         "<Order>"
