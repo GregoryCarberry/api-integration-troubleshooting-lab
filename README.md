@@ -2,9 +2,9 @@
 
 This repository contains the **Flask backend service** for the API Troubleshooting Lab project.
 
-It simulates an internal service sitting behind an API gateway and is designed to support realistic troubleshooting scenarios, including malformed requests, validation failures, dependency issues, timeouts, and structured request tracing.
+It simulates an internal service sitting behind an API gateway and is designed to support realistic troubleshooting scenarios including malformed requests, validation failures, dependency issues, timeouts, structured request tracing, and test-driven verification.
 
-This project demonstrates real-world API troubleshooting techniques, including structured logging, request tracing, and failure simulation across a gateway-backend architecture.
+This project demonstrates real-world API troubleshooting techniques across a gateway-backend architecture, with a focus on **structured logging**, **request tracing**, **failure simulation**, and **proving behaviour through tests and reproducible examples**.
 
 ---
 
@@ -18,7 +18,7 @@ The backend is responsible for:
 - simulating controlled failure scenarios
 - returning consistent response headers for request tracing
 
-The gateway handles concerns such as API key authentication, rate limiting, request correlation, and forwarding.
+The gateway handles API key authentication, rate limiting, request correlation, and request forwarding.
 
 ---
 
@@ -49,6 +49,7 @@ The backend deliberately focuses on **business logic and service behaviour**, wh
 - In-memory order storage
 - Structured JSON logging
 - `X-Request-ID` request tracing
+- Pytest-based test coverage
 
 ---
 
@@ -143,7 +144,7 @@ Supported modes:
 |------|-----------|--------|
 | `none` | normal processing | normal response |
 | `timeout` | simulates upstream timeout behaviour | `504` |
-| `dependency` | simulates dependency/service failure | `503` |
+| `dependency` | simulates dependency or downstream service failure | `503` |
 | `exception` | simulates unhandled internal exception | `500` |
 
 ---
@@ -162,7 +163,7 @@ These responses occur without failure injection:
 
 ---
 
-## Observability & Request Tracing
+## Observability and Request Tracing
 
 The backend uses structured JSON logging and request-level tracing to support debugging, failure analysis, and log correlation across services.
 
@@ -226,8 +227,44 @@ This enables:
 - end-to-end request tracing
 - faster debugging of failures
 - correlation of logs across gateway and backend services
-- cleaner visibility during timeout and dependency simulations
+- clearer visibility during timeout and dependency simulations
 - more production-like observability in a multi-service lab
+
+---
+
+## Examples
+
+The `examples/` directory contains reproducible XML payloads covering both valid and failure scenarios, including malformed requests, missing fields, invalid quantities, and incorrect root elements.
+
+These examples make it easy to demonstrate behaviour quickly without manually crafting payloads each time.
+
+---
+
+## Running Tests
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Run the test suite:
+
+```bash
+pytest -q
+```
+
+### What is covered
+
+- health endpoint behaviour
+- valid order submission
+- malformed XML handling
+- validation failures and missing fields
+- invalid quantity and wrong root element scenarios
+- unsupported content type handling
+- failure simulation (`timeout`, `dependency`, `exception`)
+- order retrieval and not-found behaviour
+- request tracing via `X-Request-ID`
 
 ---
 

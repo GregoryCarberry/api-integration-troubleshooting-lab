@@ -1,141 +1,229 @@
 from __future__ import annotations
 
-import pathlib
 import sys
-import uuid
+from pathlib import Path
 
-import requests
+import pytest
 
-BASE_URL = "http://127.0.0.1:5000"
-CREATE_ORDER_URL = f"{BASE_URL}/api/orders"
-HEALTH_URL = f"{BASE_URL}/health"
+# Allow importing app.py when running pytest from repo root
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
-EXAMPLES_DIR = ROOT / "examples"
+from app import ORDERS, app  # noqa: E402
 
-VALID_XML = (EXAMPLES_DIR / "valid-order.xml").read_text(encoding="utf-8")
-MALFORMED_XML = (EXAMPLES_DIR / "malformed-order.xml").read_text(encoding="utf-8")
-INVALID_XML_MISSING_FIELD = """<Order>
-  <CustomerID>cust-001</CustomerID>
-  <ProductID>prod-123</ProductID>
+
+VALID_ORDER_XML = b"""\
+<Order>
+  <CustomerID>CUST-1001</CustomerID>
+  <ProductID>PROD-2002</ProductID>
+  <Quantity>3</Quantity>
 </Order>
 """
 
+MALFORMED_ORDER_XML = b"""\
+<Order>
+  <CustomerID>CUST-1001</CustomerID>
+  <ProductID>PROD-2002</ProductID>
+  <Quantity>3</Quantity>
+"""
 
-def print_result(name: str, resp: requests.Response) -> None:
-    print(f"\n=== {name} ===")
-    print(f"Request : {resp.request.method} {resp.request.url}")
-    print(f"Status  : {resp.status_code}")
-    print(f"CT      : {resp.headers.get('Content-Type', '')}")
-    print(f"Req ID  : {resp.headers.get('X-Request-ID', '<missing>')}")
-    body = (resp.text or "").strip()
-    print("Body    :")
-    print(body if body else "<empty>")
+MISSING_FIELDS_XML = b"""\
+<Order>
+  <CustomerID>CUST-1001</CustomerID>
+  <Quantity>3</Quantity>
+</Order>
+"""
+
+INVALID_QUANTITY_XML = b"""\
+<Order>
+  <CustomerID>CUST-1001</CustomerID>
+  <ProductID>PROD-2002</ProductID>
+  <Quantity>-1</Quantity>
+</Order>
+"""
+
+WRONG_ROOT_XML = b"""\
+<Purchase>
+  <CustomerID>CUST-1001</CustomerID>
+  <ProductID>PROD-2002</ProductID>
+  <Quantity>3</Quantity>
+</Purchase>
+"""
 
 
-def get_health() -> requests.Response:
-    return requests.get(HEALTH_URL, timeout=10)
+@pytest.fixture()
+def client():
+    app.config["TESTING"] = True
+    ORDERS.clear()
+
+    with app.test_client() as test_client:
+        yield test_client
+
+    ORDERS.clear()
 
 
-def post_order(
-    xml_payload: str,
-    *,
-    content_type: str = "application/xml",
-    failure_mode: str | None = None,
-    request_id: str | None = None,
-    timeout: int = 10,
-) -> requests.Response:
-    headers = {
-        "Content-Type": content_type,
-        "X-Request-ID": request_id or f"test-{uuid.uuid4().hex[:8]}",
-    }
+def test_health(client):
+    response = client.get("/health")
 
-    if failure_mode is not None:
-        headers["X-Failure-Mode"] = failure_mode
+    assert response.status_code == 200
+    assert response.data == b"ok\n"
+    assert response.headers["Content-Type"].startswith("text/plain")
+    assert "X-Request-ID" in response.headers
+    assert response.headers["X-Request-ID"]
 
-    return requests.post(
-        CREATE_ORDER_URL,
-        headers=headers,
-        data=xml_payload.encode("utf-8"),
-        timeout=timeout,
+
+def test_valid_order(client):
+    response = client.post(
+        "/api/orders",
+        data=VALID_ORDER_XML,
+        headers={"Content-Type": "application/xml"},
     )
 
+    assert response.status_code == 201
+    assert response.headers["Content-Type"].startswith("application/xml")
+    assert "X-Request-ID" in response.headers
+    assert b"<OrderCreated>" in response.data
+    assert b"<OrderID>" in response.data
+    assert len(ORDERS) == 1
 
-def main() -> int:
-    scenarios: list[tuple[str, requests.Response]] = []
 
-    # 0) Health check
-    scenarios.append(("0) Health check (expected 200)", get_health()))
-
-    # 1) Success path
-    scenarios.append(
-        (
-            "1) Successful request (expected 201)",
-            post_order(VALID_XML),
-        )
+@pytest.mark.parametrize(
+    ("payload", "expected_status", "expected_text"),
+    [
+        (MALFORMED_ORDER_XML, 400, b"Bad Request: Malformed XML:"),
+        (MISSING_FIELDS_XML, 422, b"Unprocessable Entity: Invalid XML: missing or empty <ProductID>"),
+        (INVALID_QUANTITY_XML, 422, b"Unprocessable Entity: Invalid XML: <Quantity> must be a positive integer"),
+        (WRONG_ROOT_XML, 422, b"Unprocessable Entity: Invalid XML: root element must be <Order>"),
+    ],
+)
+def test_invalid_xml_variants(client, payload, expected_status, expected_text):
+    response = client.post(
+        "/api/orders",
+        data=payload,
+        headers={"Content-Type": "application/xml"},
     )
 
-    # 2) Malformed XML
-    scenarios.append(
-        (
-            "2) Malformed XML (expected 400)",
-            post_order(MALFORMED_XML),
-        )
+    assert response.status_code == expected_status
+    assert response.data.startswith(expected_text)
+    assert "X-Request-ID" in response.headers
+
+
+def test_empty_body(client):
+    response = client.post(
+        "/api/orders",
+        data=b"",
+        headers={"Content-Type": "application/xml"},
     )
 
-    # 3) Validation failure - missing Quantity
-    scenarios.append(
-        (
-            "3) Validation failure (expected 422)",
-            post_order(INVALID_XML_MISSING_FIELD),
-        )
+    assert response.status_code == 400
+    assert response.data == b"Bad Request: request body is empty\n"
+    assert "X-Request-ID" in response.headers
+
+
+def test_unsupported_content_type(client):
+    response = client.post(
+        "/api/orders",
+        data=VALID_ORDER_XML,
+        headers={"Content-Type": "application/json"},
     )
 
-    # 4) Wrong Content-Type
-    scenarios.append(
-        (
-            "4) Wrong Content-Type (expected 415)",
-            post_order(VALID_XML, content_type="application/json"),
-        )
+    assert response.status_code == 415
+    assert response.data == b"Unsupported Media Type: Content-Type must be application/xml\n"
+    assert "X-Request-ID" in response.headers
+
+
+def test_invalid_failure_mode(client):
+    response = client.post(
+        "/api/orders",
+        data=VALID_ORDER_XML,
+        headers={
+            "Content-Type": "application/xml",
+            "X-Failure-Mode": "banana",
+        },
     )
 
-    # 5) Invalid failure mode
-    scenarios.append(
-        (
-            "5) Invalid failure mode header (expected 400)",
-            post_order(VALID_XML, failure_mode="banana"),
-        )
+    assert response.status_code == 400
+    assert b"Bad Request: Invalid X-Failure-Mode." in response.data
+    assert "X-Request-ID" in response.headers
+
+
+@pytest.mark.parametrize(
+    ("failure_mode", "expected_status", "expected_text"),
+    [
+        ("dependency", 503, b"Service Unavailable: Simulated upstream dependency failure\n"),
+        ("exception", 500, b"Internal Server Error: simulated backend exception\n"),
+    ],
+)
+def test_failure_modes(client, failure_mode, expected_status, expected_text):
+    response = client.post(
+        "/api/orders",
+        data=VALID_ORDER_XML,
+        headers={
+            "Content-Type": "application/xml",
+            "X-Failure-Mode": failure_mode,
+        },
     )
 
-    # 6) Simulated dependency failure
-    scenarios.append(
-        (
-            "6) Simulated dependency failure (expected 503)",
-            post_order(VALID_XML, failure_mode="dependency"),
-        )
+    assert response.status_code == expected_status
+    assert response.data == expected_text
+    assert "X-Request-ID" in response.headers
+
+
+def test_timeout_failure_mode(client, monkeypatch):
+    monkeypatch.setattr("app.SIMULATED_TIMEOUT_SECONDS", 0)
+
+    response = client.post(
+        "/api/orders",
+        data=VALID_ORDER_XML,
+        headers={
+            "Content-Type": "application/xml",
+            "X-Failure-Mode": "timeout",
+        },
     )
 
-    # 7) Simulated internal exception
-    scenarios.append(
-        (
-            "7) Simulated internal exception (expected 500)",
-            post_order(VALID_XML, failure_mode="exception"),
-        )
+    assert response.status_code == 504
+    assert response.data == b"Gateway Timeout: Simulated upstream timeout occurred\n"
+    assert "X-Request-ID" in response.headers
+
+
+def test_get_order_success(client):
+    create_response = client.post(
+        "/api/orders",
+        data=VALID_ORDER_XML,
+        headers={"Content-Type": "application/xml"},
     )
 
-    # 8) Simulated timeout
-    scenarios.append(
-        (
-            "8) Simulated timeout (expected 504)",
-            post_order(VALID_XML, failure_mode="timeout", timeout=15),
-        )
+    assert create_response.status_code == 201
+
+    order_id = next(iter(ORDERS.keys()))
+    get_response = client.get(f"/api/orders/{order_id}")
+
+    assert get_response.status_code == 200
+    assert get_response.headers["Content-Type"].startswith("application/xml")
+    assert b"<Order>" in get_response.data
+    assert f"<OrderID>{order_id}</OrderID>".encode() in get_response.data
+    assert b"<CustomerID>CUST-1001</CustomerID>" in get_response.data
+    assert b"<ProductID>PROD-2002</ProductID>" in get_response.data
+    assert b"<Quantity>3</Quantity>" in get_response.data
+    assert "X-Request-ID" in get_response.headers
+
+
+def test_get_order_not_found(client):
+    response = client.get("/api/orders/does-not-exist")
+
+    assert response.status_code == 404
+    assert response.data == b"Not Found\n"
+    assert "X-Request-ID" in response.headers
+
+
+def test_request_id_is_propagated_when_supplied(client):
+    response = client.post(
+        "/api/orders",
+        data=VALID_ORDER_XML,
+        headers={
+            "Content-Type": "application/xml",
+            "X-Request-ID": "test-request-123",
+        },
     )
 
-    for name, response in scenarios:
-        print_result(name, response)
-
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    assert response.status_code == 201
+    assert response.headers["X-Request-ID"] == "test-request-123"
