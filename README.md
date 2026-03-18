@@ -1,301 +1,139 @@
-# API Troubleshooting Lab – Backend Service
+# Backend API (Flask)
 
-This repository contains the **Flask backend service** for the API Troubleshooting Lab project.
+This service is the backend component of the API Troubleshooting Lab. It is responsible for processing XML-based requests, validating input, simulating failures, and providing structured logging to support debugging and observability.
 
-It simulates an internal service sitting behind an API gateway and is designed to support realistic troubleshooting scenarios including malformed requests, validation failures, dependency issues, timeouts, structured request tracing, and test-driven verification.
+## Overview
 
-This project demonstrates real-world API troubleshooting techniques across a gateway-backend architecture, with a focus on **structured logging**, **request tracing**, **failure simulation**, and **proving behaviour through tests and reproducible examples**.
+The backend is intentionally designed to mimic a real-world service that:
 
----
+- accepts structured input (XML)
+- validates requests and returns meaningful errors
+- simulates downstream failures
+- supports request tracing across services
 
-## What This Service Does
-
-The backend is responsible for:
-
-- processing XML-based order requests
-- validating request structure and data
-- storing orders in memory for retrieval tests
-- simulating controlled failure scenarios
-- returning consistent response headers for request tracing
-
-The gateway handles API key authentication, rate limiting, request correlation, and request forwarding.
+It is consumed by the API Gateway, which handles authentication, rate limiting, and external access.
 
 ---
 
-## Role in the Architecture
+## Responsibilities
 
-```text
-Client
-  │
-  ▼
-API Gateway (FastAPI)
-  │
-  ▼
-Backend API (Flask)
-  │
-  ▼
-Response
-```
-
-The backend deliberately focuses on **business logic and service behaviour**, while the gateway acts as the **control and protection layer** in front of it.
+- XML request parsing and validation
+- business logic simulation (order handling)
+- failure simulation for testing resilience
+- structured logging
+- request ID propagation for tracing
 
 ---
 
-## Technology
+## Request Flow
 
-- Python
-- Flask
-- XML request payloads
-- In-memory order storage
-- Structured JSON logging
-- `X-Request-ID` request tracing
-- Pytest-based test coverage
+1. Request received (typically via gateway)
+2. `X-Request-ID` extracted or generated
+3. XML payload parsed and validated
+4. Failure mode applied (if specified)
+5. Response returned with appropriate status code
 
 ---
 
-## Endpoints
+## Failure Modes
 
-### `GET /health`
+The backend supports controlled failure simulation via the `X-Failure-Mode` header.
 
-Used to confirm the backend service is running.
+| Mode        | Behaviour                  | Status |
+|-------------|---------------------------|--------|
+| timeout     | Simulated delay           | 504    |
+| dependency  | Downstream failure        | 503    |
+| exception   | Internal error            | 500    |
 
-Example:
-
-```bash
-curl -i http://127.0.0.1:5000/health
-```
-
-Example response:
-
-```http
-HTTP/1.1 200 OK
-Content-Type: text/plain; charset=utf-8
-X-Request-ID: 6064b9e6-4a05-474b-a2b2-de47fbb94f9e
-
-ok
-```
+This allows consistent reproduction of failure scenarios for testing and troubleshooting.
 
 ---
 
-### `POST /api/orders`
+## Validation Rules
 
-Accepts XML payloads in the following format:
+The API enforces strict validation:
 
-```xml
-<Order>
-  <CustomerID>123</CustomerID>
-  <ProductID>ABC-001</ProductID>
-  <Quantity>1</Quantity>
-</Order>
-```
+- valid XML structure required
+- required fields must be present
+- numeric fields must be valid
 
-Example request:
+Common responses:
 
-```bash
-curl -X POST http://127.0.0.1:5000/api/orders \
-  -H "Content-Type: application/xml" \
-  -d '<Order><CustomerID>123</CustomerID><ProductID>ABC-001</ProductID><Quantity>1</Quantity></Order>'
-```
-
-Successful response:
-
-```xml
-<OrderCreated><OrderID>generated-order-id</OrderID></OrderCreated>
-```
+| Scenario              | Status |
+|----------------------|--------|
+| malformed XML        | 400    |
+| missing fields       | 422    |
+| invalid values       | 422    |
 
 ---
 
-### `GET /api/orders/<order_id>`
+## Observability
 
-Returns an existing order in XML format.
+The backend emits structured JSON logs including:
 
-Example:
-
-```bash
-curl http://127.0.0.1:5000/api/orders/generated-order-id
-```
-
-Successful response:
-
-```xml
-<Order>
-  <OrderID>generated-order-id</OrderID>
-  <CustomerID>123</CustomerID>
-  <ProductID>ABC-001</ProductID>
-  <Quantity>1</Quantity>
-</Order>
-```
-
----
-
-## Failure Simulation
-
-The backend supports controlled failure injection using the `X-Failure-Mode` header. This makes it possible to reproduce specific conditions during testing and troubleshooting.
-
-Example:
-
-```http
-X-Failure-Mode: timeout
-```
-
-Supported modes:
-
-| Mode | Behaviour | Status |
-|------|-----------|--------|
-| `none` | normal processing | normal response |
-| `timeout` | simulates upstream timeout behaviour | `504` |
-| `dependency` | simulates dependency or downstream service failure | `503` |
-| `exception` | simulates unhandled internal exception | `500` |
-
----
-
-## Natural Validation and Error Scenarios
-
-These responses occur without failure injection:
-
-| Scenario | Status |
-|----------|--------|
-| malformed XML | `400` |
-| invalid XML structure or missing fields | `422` |
-| unsupported content type | `415` |
-| invalid failure mode header | `400` |
-| order not found | `404` |
-
----
-
-## Observability and Request Tracing
-
-The backend uses structured JSON logging and request-level tracing to support debugging, failure analysis, and log correlation across services.
-
-Each request is assigned an `X-Request-ID`, which is:
-
-- accepted from the gateway if already present
-- generated automatically if missing
-- returned in response headers
-- included in structured log output
-
-### Example Response Header
-
-```http
-X-Request-ID: ce5830c1-895a-40ae-a7b3-4e4a44373eb4
-```
-
-### Example Log Output
-
-```json
-{
-  "timestamp": "2026-03-17T22:17:08.122882",
-  "level": "INFO",
-  "service": "api-backend",
-  "message": "Health check received",
-  "request_id": "ce5830c1-895a-40ae-a7b3-4e4a44373eb4"
-}
-```
-
-### End-to-End Trace Example
-
-A single request can be correlated across both services using the same request ID.
-
-**Response header:**
-
-```http
-X-Request-ID: ce5830c1-895a-40ae-a7b3-4e4a44373eb4
-```
-
-**Gateway log:**
-
-```json
-{
-  "message": "Gateway request received",
-  "request_id": "ce5830c1-895a-40ae-a7b3-4e4a44373eb4"
-}
-```
-
-**Backend log:**
-
-```json
-{
-  "message": "Health check received",
-  "request_id": "ce5830c1-895a-40ae-a7b3-4e4a44373eb4"
-}
-```
-
-### Why This Matters
+- request ID (`X-Request-ID`)
+- request details
+- validation errors
+- failure mode triggers
 
 This enables:
 
+- correlation with gateway logs
 - end-to-end request tracing
-- faster debugging of failures
-- correlation of logs across gateway and backend services
-- clearer visibility during timeout and dependency simulations
-- more production-like observability in a multi-service lab
+- easier debugging of failures
 
 ---
 
-## Examples
+## Example Payload
 
-The `examples/` directory contains reproducible XML payloads covering both valid and failure scenarios, including malformed requests, missing fields, invalid quantities, and incorrect root elements.
-
-These examples make it easy to demonstrate behaviour quickly without manually crafting payloads each time.
-
----
-
-## Running Tests
-
-Install dependencies:
-
-```bash
-pip install -r requirements.txt
+```xml
+<Order>
+  <Item>Widget</Item>
+  <Quantity>2</Quantity>
+</Order>
 ```
 
-Run the test suite:
+---
+
+## Testing
+
+The backend includes a pytest-based test suite covering:
+
+- valid requests
+- validation errors
+- failure modes
+- request tracing behaviour
+
+Run tests:
 
 ```bash
 pytest -q
 ```
 
-### What is covered
+---
 
-- health endpoint behaviour
-- valid order submission
-- malformed XML handling
-- validation failures and missing fields
-- invalid quantity and wrong root element scenarios
-- unsupported content type handling
-- failure simulation (`timeout`, `dependency`, `exception`)
-- order retrieval and not-found behaviour
-- request tracing via `X-Request-ID`
+## Relationship to Gateway
+
+This service is not intended to be accessed directly in normal operation.
+
+The API Gateway provides:
+
+- authentication
+- rate limiting
+- request routing
+- unified entry point
+
+The backend focuses purely on service logic and failure handling.
 
 ---
 
-## Development
+## Purpose
 
-Install dependencies:
+This service exists to demonstrate:
 
-```bash
-pip install -r requirements.txt
-```
+- input validation and error handling
+- controlled failure simulation
+- observability and tracing
+- behaviour under different failure conditions
 
-Run the service:
-
-```bash
-python app.py
-```
-
-The service starts on:
-
-```text
-http://127.0.0.1:5000
-```
-
----
-
-## Project Context
-
-This service is part of the **API Troubleshooting Lab** multi-repository project.
-
-The full architecture, diagrams, and cross-repository documentation are maintained in the hub repository:
-
-```text
-api-troubleshooting-lab
-```
+It is designed as part of a multi-service system to replicate real-world troubleshooting scenarios.
